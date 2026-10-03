@@ -299,10 +299,8 @@ log('[HvH.gg Prime] load: xuid ok')
 local API_URL = _DEBUG and "https://dev-api.mmhvh.com/v2/lua/" or "https://api.mmhvh.com/v2/lua/"
 local WEB_URL = _DEBUG and "https://dev.mmhvh.com" or "https://mmhvh.com"
 
-local SHARED_API_URL = "https://shared-api.mmhvh.com/"
-
 local CLIENT = "AIMWARE"
-local VERSION = "1.0.0"
+local VERSION = "1.0.1"
 
 local UPDATE_URL = "https://github.com/mmhvh/aimware-cs2-lua/blob/main/mmhvh_prime.lua"
 
@@ -349,7 +347,7 @@ T.s = {
 
     ['Auto'] = '自动',
     ['China'] = '中国',
-    ['Asia'] = '亚洲',
+    ['Asia-Pacific'] = '亚太',
     ['US'] = '美国',
     ['Europe'] = '欧洲',
     ['Shanghai'] = '上海',
@@ -357,9 +355,14 @@ T.s = {
     ['Shenzhen'] = '深圳',
     ['Hong Kong'] = '香港',
     ['Singapore'] = '新加坡',
+    ['Sydney'] = '悉尼',
     ['US West'] = '美国西部',
     ['US East'] = '美国东部',
+    ['Los Angeles'] = '洛杉矶',
+    ['Chicago'] = '芝加哥',
     ['Frankfurt'] = '法兰克福',
+    ['London'] = '伦敦',
+    ['Helsinki'] = '赫尔辛基',
     ['1 region'] = '1 个地区',
     ['%d regions'] = '%d 个地区',
 
@@ -392,6 +395,7 @@ T.s = {
     ['Leave'] = '离开',
     ['Join'] = '加入',
     ['HOST'] = '房主',
+    ['AWAY'] = '离开',
     ['Room created'] = '房间已创建',
     ['Joined the room'] = '已加入房间',
     ['Left the room'] = '已离开房间',
@@ -604,16 +608,7 @@ local MODES = {
     W1v1 = { '1v1 Wingman',  '1v1 搭档' },
 }
 
-local regions = {
-    { name = "CN_SHANGHAI",    label = "Shanghai",  group = "CN",   ping_url = "http://oss-cn-shanghai.aliyuncs.com" },
-    { name = "CN_BEIJING",     label = "Beijing",   group = "CN",   ping_url = "http://oss-cn-beijing.aliyuncs.com" },
-    { name = "CN_SHENZHEN",    label = "Shenzhen",  group = "CN",   ping_url = "http://oss-cn-shenzhen.aliyuncs.com" },
-    { name = "CN_HONGKONG",    label = "Hong Kong", group = "ASIA", ping_url = "http://oss-cn-hongkong.aliyuncs.com" },
-    { name = "AP_SOUTHEAST_1", label = "Singapore", group = "ASIA", ping_url = "http://oss-ap-southeast-1.aliyuncs.com" },
-    { name = "US_WEST_1",      label = "US West",   group = "US",   ping_url = "http://oss-us-west-1.aliyuncs.com" },
-    { name = "US_EAST_1",      label = "US East",   group = "US",   ping_url = "http://oss-us-east-1.aliyuncs.com" },
-    { name = "EU_CENTRAL_1",   label = "Frankfurt", group = "EU",   ping_url = "http://oss-eu-central-1.aliyuncs.com" },
-}
+local regions = {}
 
 local function real_time()
     if globals == nil or globals.RealTime == nil then return 0 end
@@ -633,14 +628,6 @@ local ping_state = {
     next_at = 0,
     order = {},
 }
-
-for i, v in ipairs(regions) do
-    v.idx = i
-    v.latency = ping_state.timeout
-    v.pinging = false
-    v.hist = {}
-    v.slot = 0
-end
 
 local function ping_sort()
     table.sort(regions, function(a, b)
@@ -756,13 +743,7 @@ local function mode_entry(id)
     return nil
 end
 
-local REGION_GROUPS = {
-    { id = "AUTO", label = "Auto" },
-    { id = "CN",   label = "China" },
-    { id = "ASIA", label = "Asia" },
-    { id = "US",   label = "US" },
-    { id = "EU",   label = "Europe" },
-}
+local REGION_GROUPS = {}
 
 local settings = {
     mode = nil,
@@ -792,7 +773,7 @@ local function load_settings()
 
     if type(d.mode) == "string" and #d.mode > 0 then settings.mode = d.mode end
     local v = tonumber(d.region)
-    if v ~= nil and v >= 1 and v <= #REGION_GROUPS then settings.region = math.floor(v) end
+    if v ~= nil and v >= 1 then settings.region = math.floor(v) end
     v = tonumber(d.lang)
     if v == 1 or v == 2 then settings.lang = math.floor(v) end
     if type(d.rules) == "boolean" then settings.rules = d.rules end
@@ -931,9 +912,39 @@ local function apply_config(data)
     end
     if #parsed == 0 then return false end
 
+    if type(g.regions) ~= "table" or type(g.regionGroups) ~= "table" then return false end
+    local rs, gs = {}, {}
+    for _, r in ipairs(g.regions) do
+        if type(r) == "table" and type(r.id) == "string" and type(r.group) == "string" and type(r.pingUrl) == "string" then
+            local i = #rs + 1
+            rs[i] = {
+                name = r.id,
+                label = type(r.label) == "string" and r.label or r.id,
+                group = r.group,
+                ping_url = r.pingUrl,
+                idx = i,
+                latency = ping_state.timeout,
+                pinging = false,
+                hist = {},
+                slot = 0,
+            }
+        end
+    end
+    for _, r in ipairs(g.regionGroups) do
+        if type(r) == "table" and type(r.id) == "string" then
+            gs[#gs + 1] = { id = r.id, label = type(r.label) == "string" and r.label or r.id }
+        end
+    end
+    if #rs == 0 or #gs == 0 then return false end
+
     cfg.modes = parsed
     cfg.pools.c = { min = comp.minMaps or 0, maps = comp.maps }
     cfg.pools.w = { min = wing.minMaps or 0, maps = wing.maps }
+
+    regions = rs
+    REGION_GROUPS = gs
+    if settings.region > #REGION_GROUPS then settings.region = 1 end
+    ping_state.gen = ping_state.gen + 1
 
     if settings.mode == nil or mode_entry(settings.mode) == nil then
         settings.mode = cfg.modes[1].id
@@ -951,7 +962,7 @@ local function apply_config(data)
 end
 
 local function active_regions()
-    local id = (REGION_GROUPS[settings.region] or REGION_GROUPS[1]).id
+    local id = (REGION_GROUPS[settings.region] or REGION_GROUPS[1] or { id = "AUTO" }).id
     local list = {}
     for _, v in ipairs(regions) do
         if id == "AUTO" or v.group == id then list[#list + 1] = v end
@@ -1120,7 +1131,6 @@ local function api(authorize, endpoint, args, callback, opts)
     if authorize and state.login_token == nil then return false end
 
     local soft = opts ~= nil and opts.soft == true
-    local base = (opts ~= nil and opts.base) or API_URL
 
     local options = {
         headers = { Referer = HTTP_REFERER },
@@ -1145,7 +1155,7 @@ local function api(authorize, endpoint, args, callback, opts)
     local seq = state.api_seq
     local sent_at = real_time()
 
-    local url = base .. endpoint
+    local url = API_URL .. endpoint
 
     local function on_done(ok, response)
         state.requesting = state.requesting - 1
@@ -1613,6 +1623,7 @@ local function api_check_state()
 end
 
 local function api_update_region()
+    if not cfg.ready then return false end
     local key = region_list_key()
     if key == state.sent_region_key then return false end
     return send('region', true, "update-lobby-region", { region = get_region_list() }, function(api_success, data)
@@ -2105,13 +2116,13 @@ local function fetch_player_names()
     if n == 0 then return end
 
     pn.inflight = true
-    local sent = api(true, "steam/lua/players", { steam_ids = batch }, function(ok, data, code)
+    local sent = api(true, "steam-players", { steam_ids = batch }, function(ok, data, code)
         pn.inflight = false
 
         if not ok or data == nil or data.status ~= true or type(data.data) ~= 'table' then
             if code == 401 then
                 pn.off = true
-                log('[HvH.gg Prime] steam names: off (unauthorized on shared-api)')
+                log('[HvH.gg Prime] steam names: off (unauthorized)')
                 return
             end
             pn.retry_at = utils.get_unix_time() + 60
@@ -2126,7 +2137,7 @@ local function fetch_player_names()
                 pn.name[it.steam_id] = nm
             end
         end
-    end, { base = SHARED_API_URL, soft = true })
+    end, { soft = true })
 
     if not sent then
         pn.inflight = false
@@ -3847,6 +3858,7 @@ function room.build_players(x, y, w, host_here)
             if host_row then badges[#badges + 1] = { L('HOST'), C.primary, C.on_primary } end
             if p.membershipTier == 'SVIP' then badges[#badges + 1] = { 'SVIP', C.svip, C.on_primary }
             elseif p.membershipTier == 'VIP' then badges[#badges + 1] = { 'VIP', C.vip, C.on_primary } end
+            if p.online == false then badges[#badges + 1] = { L('AWAY'), C.warn, C.on_dhdj } end
             for k = #badges, 1, -1 do
                 local b = badges[k]
                 local bw = text_size(F.bold, b[1]) + 8
@@ -3856,7 +3868,9 @@ function room.build_players(x, y, w, host_here)
                 right = right - 4
             end
 
-            text(F.main, bx + 8, by + 5, ellipsize(F.main, shown, right - bx - 10), mine and C.primary_light or C.text)
+            local name_col = mine and C.primary_light or C.text
+            if p.online == false then name_col = C.text_mute end
+            text(F.main, bx + 8, by + 5, ellipsize(F.main, shown, right - bx - 10), name_col)
         end
     end
     return rows * (ch + 4) - 4
